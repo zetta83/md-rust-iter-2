@@ -1,0 +1,15 @@
+[package]
+name = "quote_client"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+logging = ["quote_libs/logging"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+quote_libs = { path = "../quote" }
+
+[[bin]]
+name = "client"
+path = "./src/main.rs"
