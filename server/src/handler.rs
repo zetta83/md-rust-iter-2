@@ -34,7 +34,7 @@ pub fn handler(stream: TcpStream, manager: Arc<Mutex<StreamManager>>) -> Result<
                     e.to_string() + "\r\n"
                 });
 
-                let _ = writer.write_all(response.as_bytes());
+                let _ = writer.write_all(format!("{}\r\n", response).as_bytes());
                 let _ = writer.flush();
             }
             Err(e) => {
@@ -47,12 +47,10 @@ pub fn handler(stream: TcpStream, manager: Arc<Mutex<StreamManager>>) -> Result<
 fn handle_command(input: &str, manager: &Arc<Mutex<StreamManager>>) -> Result<String, StreamError> {
     let mut parts = input.split_whitespace();
 
-    let result = match parts.next() {
-        Some("STREAM") => handle_stream_command(parts, manager)?,
-        _ => return Err(StreamError::UnknownCommand),
-    };
-
-    Ok(result)
+    match parts.next() {
+        Some("STREAM") => Ok(handle_stream_command(parts, manager)?),
+        _ => Err(StreamError::UnknownCommand),
+    }
 }
 
 fn handle_stream_command(
@@ -69,10 +67,12 @@ fn handle_stream_command(
         return Err(StreamError::EmptyTickers);
     }
 
-    let mut v = manager.lock().map_err(|_| StreamError::ManagerLockFailed)?;
-    v.add_stream(udp_addr, &tickers)?;
-
-    Ok(format!("OK: Stream added for {}\n", udp_addr))
+    if let Ok(mut stream_manager) = manager.lock() {
+        stream_manager.add_stream(udp_addr, &tickers)?;
+        Ok(format!("Successfully added '{}'", udp_addr))
+    } else {
+        Err(StreamError::ManagerLockFailed)
+    }
 }
 
 fn parse_udp_address(addr_str: &str) -> Result<std::net::SocketAddr, StreamError> {

@@ -145,12 +145,9 @@ impl StreamManager {
     }
 
     pub fn add_stream(&mut self, addr: SocketAddr, tickers: &[&str]) -> Result<(), StreamError> {
-        let mut streams = self
-            .streams
-            .lock()
-            .map_err(|_| StreamError::ManagerLockFailed)?;
-
-        if streams.contains_key(&addr) {
+        if let Ok(streams) = self.streams.lock()
+            && streams.contains_key(&addr)
+        {
             return Err(StreamError::AddressAlreadyExists);
         }
 
@@ -165,16 +162,19 @@ impl StreamManager {
         );
 
         let client_tickers = tickers.iter().map(|s| s.to_string()).collect();
-        streams.insert(
-            addr,
-            StreamParams {
-                tickers: client_tickers,
-                last_seen: Instant::now(),
-                sender_handler,
-            },
-        );
 
-        drop(streams);
+        if let Ok(mut streams) = self.streams.lock() {
+            streams.insert(
+                addr,
+                StreamParams {
+                    tickers: client_tickers,
+                    last_seen: Instant::now(),
+                    sender_handler,
+                },
+            );
+        } else {
+            return Err(StreamError::ManagerLockFailed);
+        }
 
         debug!(
             "Added stream {} for tickers {:?}",
@@ -185,36 +185,31 @@ impl StreamManager {
         Ok(())
     }
 
+    pub fn get_expired_addrs(&self, timeout: &Duration) -> Vec<SocketAddr> {
+        if let Ok(streams) = self.streams.lock() {
+            streams
+                .iter()
+                .filter(|(_, stream)| stream.last_seen.elapsed() >= *timeout)
+                .map(|(addr, _)| *addr)
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+
     pub fn cleanup_expired_streams(&mut self, timeout_seconds: u64) -> Result<(), StreamError> {
         let timeout = Duration::from_secs(timeout_seconds);
-        let mut streams = self
-            .streams
-            .lock()
-            .map_err(|_| StreamError::ManagerLockFailed)?;
 
-        let expired_addrs: Vec<SocketAddr> = streams
-            .iter()
-            .filter(|(_, stream)| stream.last_seen.elapsed() >= timeout)
-            .map(|(addr, _)| *addr)
-            .collect();
-
-        debug!("expired_addrs: {:?}", expired_addrs);
-
-        for addr in expired_addrs {
-            if let Some(stream) = streams.remove(&addr) {
+        for addr in self.get_expired_addrs(&timeout) {
+            if let Some(stream) = if let Ok(mut streams) = self.streams.lock() {
+                streams.remove(&addr)
+            } else {
+                None
+            } {
                 info!(
                     "Removing expired stream: {} (no PING for {} seconds)",
                     addr, timeout_seconds
                 );
-
-                for ticker in &stream.tickers {
-                    let ticker_in_use = { streams.values().any(|t| t.tickers.contains(ticker)) };
-
-                    if !ticker_in_use && let Ok(mut ts) = self.tickers.lock() {
-                        info!("removing ticker {}", ticker);
-                        ts.remove(ticker);
-                    }
-                }
 
                 let sender_clone = Arc::clone(&self.tickers_sender);
                 if let Err(e) = sender_clone.stop_broadcasting(addr.to_string().as_str()) {
@@ -223,6 +218,26 @@ impl StreamManager {
 
                 if let Err(e) = stream.sender_handler.join() {
                     error!("Failed to join stream handler for {}: {:?}", addr, e);
+                }
+
+                for ticker in &stream.tickers {
+                    let ticker_in_use = if let Ok(streams) = self.streams.lock() {
+                        streams.values().any(|t| t.tickers.contains(ticker))
+                    } else {
+                        false
+                    };
+
+                    if !ticker_in_use {
+                        if let Ok(mut ts) = self.tickers.lock() {
+                            info!("removing ticker {}", ticker);
+                            ts.remove(ticker);
+                        }
+
+                        if let Ok(mut ts) = self.quotes.lock() {
+                            info!("removing quotes {}", ticker);
+                            ts.remove(ticker);
+                        }
+                    }
                 }
             }
         }
