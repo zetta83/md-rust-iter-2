@@ -9,3 +9,4 @@ logging = ["dep:log", "dep:env_logger"]
 [dependencies]
 log = { version = "0.4", optional = true }
 env_logger = { version = "0.11", optional = true }
+rand = "0.10.1"

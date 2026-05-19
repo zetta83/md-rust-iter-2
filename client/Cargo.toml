@@ -9,6 +9,7 @@ logging = ["quote_libs/logging"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 quote_libs = { path = "../quote" }
+socket2="0.6.3"
 
 [[bin]]
 name = "client"
