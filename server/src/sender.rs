@@ -46,31 +46,29 @@ impl TickersSender {
         interval_ms: u64,
     ) -> Result<(), Box<dyn std::error::Error + '_>> {
         loop {
+            if let Ok(mut setter) = self.should_be_stopped.lock()
+                && setter.remove(target_addr)
             {
-                let mut setter = self.should_be_stopped.lock()?;
-                if setter.get(target_addr).is_some() {
-                    setter.remove(target_addr);
-                    return Ok(());
-                }
+                return Ok(());
             }
 
-            match map_tickers.lock() {
-                Ok(map_tickers) => {
-                    for ticker in tickers.iter() {
-                        if let Some(v) = map_tickers.get(ticker) {
-                            match self.send_to(v, target_addr) {
-                                Ok(_) => {
-                                    debug!("Ticker sent to {}", target_addr);
-                                }
-                                Err(err) => {
-                                    error!("Failed to send ticker to {}: {}", target_addr, err);
-                                }
-                            }
-                        }
+            let values = if let Ok(map_tickers) = map_tickers.lock() {
+                tickers
+                    .iter()
+                    .filter_map(|t| map_tickers.get(t).cloned())
+                    .collect()
+            } else {
+                vec![]
+            };
+
+            for value in values {
+                match self.send_to(&value, target_addr) {
+                    Ok(_) => {
+                        debug!("Ticker {} sent to {}", value.ticker, target_addr);
                     }
-                }
-                Err(err) => {
-                    error!("TickersSender::start_broadcasting error: {}", err);
+                    Err(err) => {
+                        error!("Failed to send ticker to {}: {}", target_addr, err);
+                    }
                 }
             }
 
