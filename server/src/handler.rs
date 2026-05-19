@@ -1,6 +1,6 @@
 use crate::clients::StreamManager;
 use crate::errors::{ServerError, StreamError};
-use quote_libs::error;
+use quote_libs::{error, filter_tickers};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -61,14 +61,17 @@ fn handle_stream_command(
     let udp_addr = parse_udp_address(addr_str)?;
 
     let tickers_str = parts.next().ok_or(StreamError::MissingTickers)?;
-    let tickers: Vec<&str> = tickers_str.split(',').collect();
 
-    if tickers.is_empty() {
+    let tickers: Vec<String> = tickers_str.split(',').map(|v| v.to_string()).collect();
+    let filtered_tickers: Vec<String> = filter_tickers(&tickers);
+    let tickers_str: Vec<_> = filtered_tickers.iter().map(|v| v.as_str()).collect();
+
+    if tickers_str.is_empty() {
         return Err(StreamError::EmptyTickers);
     }
 
     if let Ok(mut stream_manager) = manager.lock() {
-        stream_manager.add_stream(udp_addr, &tickers)?;
+        stream_manager.add_stream(udp_addr, &tickers_str)?;
         Ok(format!("Successfully added '{}'", udp_addr))
     } else {
         Err(StreamError::ManagerLockFailed)

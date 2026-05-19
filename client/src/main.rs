@@ -3,7 +3,7 @@ use crate::errors::QuoteClientError;
 use crate::receiver::{Receiver, TickerReceiver};
 use crate::sender::PingSender;
 use clap::Parser;
-use quote_libs::{debug, error, info, init_logger};
+use quote_libs::{debug, error, filter_tickers, info, init_logger};
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{fs, thread};
@@ -46,11 +46,13 @@ fn main() -> Result<(), QuoteClientError> {
         .map_err(|e| QuoteClientError::IOError(format!("tickers file not found: {}", e)))?;
     let reader = BufReader::new(file_h);
 
-    let tickers: Vec<String> = reader
-        .lines()
-        .map(|l| l.map(|s| s.trim().to_string()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| QuoteClientError::IOError(format!("error reading line: {}", e)))?;
+    let tickers: Vec<String> = filter_tickers(
+        &reader
+            .lines()
+            .map(|l| l.map(|s| s.trim().to_string()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| QuoteClientError::IOError(format!("error reading line: {}", e)))?,
+    );
 
     let client = QuoteClient::new(args.server_addr.as_str(), args.udp_port.as_str(), &tickers);
     client.send_command_create_stream()?;
